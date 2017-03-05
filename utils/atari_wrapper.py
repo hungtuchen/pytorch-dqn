@@ -1,11 +1,11 @@
 """
     This file is copied/apdated from https://github.com/berkeleydeeprlcourse/homework/tree/master/hw3
 """
-import cv2
 import numpy as np
 from collections import deque
 import gym
 from gym import spaces
+from PIL import Image
 
 class NoopResetEnv(gym.Wrapper):
     def __init__(self, env=None, noop_max=30):
@@ -108,7 +108,9 @@ class MaxAndSkipEnv(gym.Wrapper):
 def _process_frame84(frame):
     img = np.reshape(frame, [210, 160, 3]).astype(np.float32)
     img = img[:, :, 0] * 0.299 + img[:, :, 1] * 0.587 + img[:, :, 2] * 0.114
-    resized_screen = cv2.resize(img, (84, 110),  interpolation=cv2.INTER_LINEAR)
+    img = Image.fromarray(img)
+    resized_screen = img.resize((84, 110), Image.BILINEAR)
+    resized_screen = np.array(resized_screen)
     x_t = resized_screen[18:102, :]
     x_t = np.reshape(x_t, [84, 84, 1])
     return x_t.astype(np.uint8)
