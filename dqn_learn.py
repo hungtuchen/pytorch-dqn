@@ -18,6 +18,7 @@ from utils.replay_buffer import ReplayBuffer
 from utils.gym import get_wrapper_by_name
 
 USE_CUDA = torch.cuda.is_available()
+dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
 class Variable(autograd.Variable):
     def __init__(self, data, *args, **kwargs):
         if USE_CUDA:
@@ -104,15 +105,15 @@ def dqn_learing(
         sample = random.random()
         eps_threshold = exploration.value(t)
         if sample > eps_threshold:
-            obs = torch.from_numpy(obs).float().unsqueeze(0) / 255.0
+            obs = torch.from_numpy(obs).type(dtype).unsqueeze(0) / 255.0
             # Detach variable from the current graph since we don't want gradients to propagated
             return model(Variable(obs)).detach().data.max(1)[1].cpu()
         else:
             return torch.IntTensor([[random.randrange(num_actions)]])
 
     # Initialize target q function and q function
-    Q = q_func(input_shape[2], num_actions)
-    target_Q = q_func(input_shape[2], num_actions)
+    Q = q_func(input_shape[2], num_actions).type(dtype)
+    target_Q = q_func(input_shape[2], num_actions).type(dtype)
 
     # Construct optimizer with adaptive learning rate
     # https://discuss.pytorch.org/t/adaptive-learning-rate/320
@@ -174,11 +175,17 @@ def dqn_learing(
             # episode, only the current state reward contributes to the target
             obs_batch, act_batch, rew_batch, next_obs_batch, done_mask = replay_buffer.sample(batch_size)
             # Convert numpy nd_array to torch variables for calculation
-            obs_batch = Variable(torch.from_numpy(obs_batch.transpose(0, 3, 1, 2)).float() / 255.0)
+            obs_batch = Variable(torch.from_numpy(obs_batch.transpose(0, 3, 1, 2)).type(dtype) / 255.0)
             act_batch = Variable(torch.from_numpy(act_batch).long())
             rew_batch = Variable(torch.from_numpy(rew_batch))
-            next_obs_batch = Variable(torch.from_numpy(next_obs_batch.transpose(0, 3, 1, 2)).float() / 255.0, volatile=True)
+            next_obs_batch = Variable(torch.from_numpy(next_obs_batch.transpose(0, 3, 1, 2)).type(dtype) / 255.0, volatile=True)
             done_mask = torch.from_numpy(done_mask)
+
+            if USE_CUDA:
+                act_batch = act_batch.cuda()
+                rew_batch = rew_batch.cuda()
+                done_mask = done_mask.cuda()
+
             # Compute current Q value, q_func takes only state and output value for every state-action pair
             # We choose Q based on action taken.
             current_Q_values = Q(obs_batch).gather(1, act_batch.unsqueeze(1))
