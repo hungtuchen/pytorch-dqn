@@ -1,9 +1,9 @@
 import gym
 import torch.optim as optim
 
-from dqn_model import DQN
+from dqn_model import DQN_RAM
 from dqn_learn import OptimizerSpec, dqn_learing
-from utils.gym import get_env, get_wrapper_by_name
+from utils.gym import get_ram_env, get_wrapper_by_name
 from utils.schedule import PiecewiseSchedule, LinearSchedule
 
 BATCH_SIZE = 32
@@ -11,7 +11,7 @@ GAMMA = 0.99
 REPLAY_BUFFER_SIZE=1000000
 LEARNING_STARTS=50000
 LEARNING_FREQ=4
-FRAME_HISTORY_LEN=4
+FRAME_HISTORY_LEN=1
 TARGER_UPDATE_FREQ=10000
 GRAD_NORM_CLIPPING=10
 
@@ -20,7 +20,7 @@ def stopping_criterion(n):
     # which is different from the number of steps in the underlying env
     return lambda env:  get_wrapper_by_name(env, "Monitor").get_total_steps() >= n
 
-def main(env, num_timesteps):
+def main(env, num_timesteps=int(4e7)):
     # This is just a rough estimate
     num_iterations = float(num_timesteps) / 4.0
 
@@ -39,14 +39,14 @@ def main(env, num_timesteps):
     )
 
     exploration_schedule = PiecewiseSchedule([
-        (0, 1.0),
+        (0, 0.2),
         (1e6, 0.1),
         (num_iterations / 2, 0.01),
     ], outside_value=0.01)
 
     dqn_learing(
         env=env,
-        q_func=DQN,
+        q_func=DQN_RAM,
         optimizer_spec=optimizer,
         exploration=exploration_schedule,
         stopping_criterion=stopping_criterion(num_timesteps),
@@ -62,13 +62,10 @@ def main(env, num_timesteps):
 
 if __name__ == '__main__':
     # Get Atari games.
-    benchmark = gym.benchmark_spec('Atari40M')
-
-    # Change the index to select a different game.
-    task = benchmark.tasks[3]
+    env = gym.make('Pong-ram-v0')
 
     # Run training
     seed = 0 # Use a seed of zero (you may want to randomize the seed!)
-    env = get_env(task, seed)
+    env = get_ram_env(env, seed)
 
-    main(env, task.max_timesteps)
+    main(env)

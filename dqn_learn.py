@@ -19,6 +19,7 @@ from utils.gym import get_wrapper_by_name
 
 USE_CUDA = torch.cuda.is_available()
 dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
+
 class Variable(autograd.Variable):
     def __init__(self, data, *args, **kwargs):
         if USE_CUDA:
@@ -26,6 +27,16 @@ class Variable(autograd.Variable):
         super(Variable, self).__init__(data, *args, **kwargs)
 
 OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
+
+# Check if the parameters of the model update accordingly.
+def check_norm(model):
+    total_norm = 0.0
+    for p in model.parameters():
+        param_norm = p.grad.data.norm(2.0)
+        total_norm += param_norm ** 2.0
+    total_norm = total_norm ** (1.0 / 2.0)
+    return total_norm
+
 
 def dqn_learing(
     env,
@@ -94,10 +105,10 @@ def dqn_learing(
 
     if len(env.observation_space.shape) == 1:
         # This means we are running on low-dimensional observations (e.g. RAM)
-        input_shape = env.observation_space.shape
+        input_arg = env.observation_space.shape[0]
     else:
         img_h, img_w, img_c = env.observation_space.shape
-        input_shape = (img_h, img_w, frame_history_len * img_c)
+        input_arg = frame_history_len * img_c
     num_actions = env.action_space.n
 
     # Construct an epilson greedy policy with given exploration schedule
@@ -106,14 +117,14 @@ def dqn_learing(
         eps_threshold = exploration.value(t)
         if sample > eps_threshold:
             obs = torch.from_numpy(obs).type(dtype).unsqueeze(0) / 255.0
-            # Detach variable from the current graph since we don't want gradients to propagated
-            return model(Variable(obs)).detach().data.max(1)[1].cpu()
+            # Use volatile = True if variable is only used in inference mode, i.e. don’t save the history
+            return model(Variable(obs, volatile=True)).data.max(1)[1].cpu()
         else:
             return torch.IntTensor([[random.randrange(num_actions)]])
 
     # Initialize target q function and q function
-    Q = q_func(input_shape[2], num_actions).type(dtype)
-    target_Q = q_func(input_shape[2], num_actions).type(dtype)
+    Q = q_func(input_arg, num_actions).type(dtype)
+    target_Q = q_func(input_arg, num_actions).type(dtype)
 
     # Construct optimizer with adaptive learning rate
     # https://discuss.pytorch.org/t/adaptive-learning-rate/320
@@ -148,6 +159,7 @@ def dqn_learing(
         # previous frames.
         # recent_observations: shape(img_h, img_w, frame_history_len) are input to to the model
         recent_observations = replay_buffer.encode_recent_observation().transpose(2, 0, 1)
+        # recent_observations = replay_buffer.encode_recent_observation()
 
         # Choose random action if not yet start learning
         if t > learning_starts:
@@ -176,9 +188,11 @@ def dqn_learing(
             obs_batch, act_batch, rew_batch, next_obs_batch, done_mask = replay_buffer.sample(batch_size)
             # Convert numpy nd_array to torch variables for calculation
             obs_batch = Variable(torch.from_numpy(obs_batch.transpose(0, 3, 1, 2)).type(dtype) / 255.0)
+            # obs_batch = Variable(torch.from_numpy(obs_batch).type(dtype) / 255.0)
             act_batch = Variable(torch.from_numpy(act_batch).long())
             rew_batch = Variable(torch.from_numpy(rew_batch))
             next_obs_batch = Variable(torch.from_numpy(next_obs_batch.transpose(0, 3, 1, 2)).type(dtype) / 255.0, volatile=True)
+            # next_obs_batch = Variable(torch.from_numpy(next_obs_batch).type(dtype) / 255.0, volatile=True)
             done_mask = torch.from_numpy(done_mask)
 
             if USE_CUDA:
@@ -190,22 +204,36 @@ def dqn_learing(
             # We choose Q based on action taken.
             current_Q_values = Q(obs_batch).gather(1, act_batch.unsqueeze(1))
             # Compute next Q value, based on which acion gives max Q values
-            next_max_Q_values = Variable(torch.zeros(batch_size))
-            next_max_Q_values[done_mask == 0] = target_Q(next_obs_batch).max(1)[0]
+            next_max_Q_values = Variable(torch.zeros(batch_size).type(dtype))
+            # # Detach variable from the current graph since we don't want gradients to propagated
+            next_max_Q_values[done_mask == 0] = target_Q(next_obs_batch).detach().max(1)[0]
             # Compute Bellman error, use huber loss to mitigate outlier impact
             bellman_error = F.smooth_l1_loss(current_Q_values, rew_batch + (gamma * next_max_Q_values))
             # Run backward pass and clip the gradient
+            Q.zero_grad()
             bellman_error.backward()
-            nn.utils.clip_grad_norm(Q.parameters(), grad_norm_clipping)
+
+            if check_norm(Q) > grad_norm_clipping:
+                print('Before clipping gradient:')
+                print('total_norm: ', check_norm(Q))
+                nn.utils.clip_grad_norm(Q.parameters(), grad_norm_clipping)
+                print('After clipping gradient:')
+                print('total_norm: ', check_norm(Q))
             # Perfom the update
             optimizer = construct_optimizer(t)
             optimizer.step()
+            # print('After update Q:')
+            # check_norm(Q)
             num_param_updates += 1
 
             # Periodically update the target network by Q network to target Q network
             if num_param_updates % target_update_freq == 0:
+                # print('Before update target:')
+                # check_norm(target_Q)
                 for target_param, param in zip(target_Q.parameters(), Q.parameters()):
                     target_param.data = param.data.clone()
+                # print('After update target:')
+                # check_norm(target_Q)
 
         ### 4. Log progress
         episode_rewards = get_wrapper_by_name(env, "Monitor").get_episode_rewards()
