@@ -32,7 +32,7 @@ def main(env, num_timesteps=int(4e7)):
         (num_iterations / 2,  5e-5 * lr_multiplier),
     ], outside_value=5e-5 * lr_multiplier)
 
-    optimizer = OptimizerSpec(
+    optimizer_spec = OptimizerSpec(
         constructor=optim.Adam,
         kwargs=dict(eps=1e-4),
         lr_schedule=lr_schedule
@@ -47,7 +47,7 @@ def main(env, num_timesteps=int(4e7)):
     dqn_learing(
         env=env,
         q_func=DQN_RAM,
-        optimizer_spec=optimizer,
+        optimizer_spec=optimizer_spec,
         exploration=exploration_schedule,
         stopping_criterion=stopping_criterion(num_timesteps),
         replay_buffer_size=REPLAY_BUFFER_SIZE,

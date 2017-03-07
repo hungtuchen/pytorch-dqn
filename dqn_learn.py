@@ -26,17 +26,23 @@ class Variable(autograd.Variable):
             data = data.cuda()
         super(Variable, self).__init__(data, *args, **kwargs)
 
+"""
+    OptimizerSpec containing following attributes
+        constructor: The optimizer constructor ex: Adam
+        kwargs: {Dict} arguments for constructing optimizer
+        lr_schedule: The learning schedule using Schedule defined in utils.schedule
+"""
 OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
-
-# Check if the parameters of the model update accordingly.
-def check_norm(model):
-    total_norm = 0.0
-    for p in model.parameters():
-        param_norm = p.grad.data.norm(2.0)
-        total_norm += param_norm ** 2.0
-    total_norm = total_norm ** (1.0 / 2.0)
-    return total_norm
-
+"""
+    Construct optimizer with adaptive learning rate
+    https://discuss.pytorch.org/t/adaptive-learning-rate/320
+    Currently in torch, we create a new optimizer every time when we want to adjust learning rate dynamically.
+    Arguments:
+        model: the model need to be updated. In this case: Q model
+        spec: {Dict} OptimizerSpec as defined above
+"""
+def construct_optimizer_func(model, spec):
+    return lambda t: spec.constructor(model.parameters(), lr=spec.lr_schedule.value(t), **spec.kwargs)
 
 def dqn_learing(
     env,
@@ -126,12 +132,9 @@ def dqn_learing(
     Q = q_func(input_arg, num_actions).type(dtype)
     target_Q = q_func(input_arg, num_actions).type(dtype)
 
-    # Construct optimizer with adaptive learning rate
-    # https://discuss.pytorch.org/t/adaptive-learning-rate/320
-    # Currently in torch, we have create a new optimizer every time when we want to adjust learning rate dynamically.
-    def construct_optimizer(t):
-        lr = optimizer_spec.lr_schedule.value(t)
-        return optimizer_spec.constructor(Q.parameters(), lr=lr, **optimizer_spec.kwargs)
+    # Construct Q network optimizer function
+    # optimizer_func = construct_optimizer_func(Q, optimizer_spec)
+    optimizer = torch.optim.Adam(Q.parameters())
 
     # Construct the replay buffer
     replay_buffer = ReplayBuffer(replay_buffer_size, frame_history_len)
@@ -159,11 +162,10 @@ def dqn_learing(
         # previous frames.
         # recent_observations: shape(img_h, img_w, frame_history_len) are input to to the model
         recent_observations = replay_buffer.encode_recent_observation().transpose(2, 0, 1)
-        # recent_observations = replay_buffer.encode_recent_observation()
 
         # Choose random action if not yet start learning
         if t > learning_starts:
-            action = select_epilson_greedy_action(target_Q, recent_observations, t)[0, 0]
+            action = select_epilson_greedy_action(Q, recent_observations, t)[0, 0]
         else:
             action = random.randrange(num_actions)
         # Advance one step
@@ -188,11 +190,10 @@ def dqn_learing(
             obs_batch, act_batch, rew_batch, next_obs_batch, done_mask = replay_buffer.sample(batch_size)
             # Convert numpy nd_array to torch variables for calculation
             obs_batch = Variable(torch.from_numpy(obs_batch.transpose(0, 3, 1, 2)).type(dtype) / 255.0)
-            # obs_batch = Variable(torch.from_numpy(obs_batch).type(dtype) / 255.0)
+            obs_batch = Variable(torch.from_numpy(obs_batch).type(dtype) / 255.0)
             act_batch = Variable(torch.from_numpy(act_batch).long())
             rew_batch = Variable(torch.from_numpy(rew_batch))
-            next_obs_batch = Variable(torch.from_numpy(next_obs_batch.transpose(0, 3, 1, 2)).type(dtype) / 255.0, volatile=True)
-            # next_obs_batch = Variable(torch.from_numpy(next_obs_batch).type(dtype) / 255.0, volatile=True)
+            next_obs_batch = Variable(torch.from_numpy(next_obs_batch.transpose(0, 3, 1, 2)).type(dtype) / 255.0)
             done_mask = torch.from_numpy(done_mask)
 
             if USE_CUDA:
@@ -208,32 +209,24 @@ def dqn_learing(
             # # Detach variable from the current graph since we don't want gradients to propagated
             next_max_Q_values[done_mask == 0] = target_Q(next_obs_batch).detach().max(1)[0]
             # Compute Bellman error, use huber loss to mitigate outlier impact
-            bellman_error = F.smooth_l1_loss(current_Q_values, rew_batch + (gamma * next_max_Q_values))
-            # Run backward pass and clip the gradient
-            Q.zero_grad()
-            bellman_error.backward()
+            target_Q_values = rew_batch + (gamma * next_max_Q_values)
+            bellman_error = F.smooth_l1_loss(current_Q_values, target_Q_values)
 
-            if check_norm(Q) > grad_norm_clipping:
-                print('Before clipping gradient:')
-                print('total_norm: ', check_norm(Q))
-                nn.utils.clip_grad_norm(Q.parameters(), grad_norm_clipping)
-                print('After clipping gradient:')
-                print('total_norm: ', check_norm(Q))
+            # Construct and optimizer and clear previous gradients
+            optimizer = optimizer_func(t)
+            optimizer.zero_grad()
+
+            # run backward pass and clip the gradient
+            bellman_error.backward()
+            nn.utils.clip_grad_norm(Q.parameters(), grad_norm_clipping)
+
             # Perfom the update
-            optimizer = construct_optimizer(t)
             optimizer.step()
-            # print('After update Q:')
-            # check_norm(Q)
             num_param_updates += 1
 
             # Periodically update the target network by Q network to target Q network
             if num_param_updates % target_update_freq == 0:
-                # print('Before update target:')
-                # check_norm(target_Q)
-                for target_param, param in zip(target_Q.parameters(), Q.parameters()):
-                    target_param.data = param.data.clone()
-                # print('After update target:')
-                # check_norm(target_Q)
+                target_Q.load_state_dict(Q.state_dict())
 
         ### 4. Log progress
         episode_rewards = get_wrapper_by_name(env, "Monitor").get_episode_rewards()
