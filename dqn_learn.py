@@ -190,7 +190,6 @@ def dqn_learing(
             obs_batch, act_batch, rew_batch, next_obs_batch, done_mask = replay_buffer.sample(batch_size)
             # Convert numpy nd_array to torch variables for calculation
             obs_batch = Variable(torch.from_numpy(obs_batch.transpose(0, 3, 1, 2)).type(dtype) / 255.0)
-            obs_batch = Variable(torch.from_numpy(obs_batch).type(dtype) / 255.0)
             act_batch = Variable(torch.from_numpy(act_batch).long())
             rew_batch = Variable(torch.from_numpy(rew_batch))
             next_obs_batch = Variable(torch.from_numpy(next_obs_batch.transpose(0, 3, 1, 2)).type(dtype) / 255.0)
