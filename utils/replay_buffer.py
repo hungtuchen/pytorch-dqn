@@ -58,10 +58,10 @@ class ReplayBuffer(object):
         return batch_size + 1 <= self.num_in_buffer
 
     def _encode_sample(self, idxes):
-        obs_batch      = np.concatenate([self._encode_observation(idx)[None] for idx in idxes], 0)
+        obs_batch      = np.concatenate([self._encode_observation(idx)[np.newaxis, :] for idx in idxes], 0)
         act_batch      = self.action[idxes]
         rew_batch      = self.reward[idxes]
-        next_obs_batch = np.concatenate([self._encode_observation(idx + 1)[None] for idx in idxes], 0)
+        next_obs_batch = np.concatenate([self._encode_observation(idx + 1)[np.newaxis, :] for idx in idxes], 0)
         done_mask      = np.array([1.0 if self.done[idx] else 0.0 for idx in idxes], dtype=np.float32)
 
         return obs_batch, act_batch, rew_batch, next_obs_batch, done_mask
@@ -87,7 +87,7 @@ class ReplayBuffer(object):
         -------
         obs_batch: np.array
             Array of shape
-            (batch_size, img_h, img_w, img_c * frame_history_len)
+            (batch_size, img_c * frame_history_len, img_h, img_w)
             and dtype np.uint8
         act_batch: np.array
             Array of shape (batch_size,) and dtype np.int32
@@ -95,7 +95,7 @@ class ReplayBuffer(object):
             Array of shape (batch_size,) and dtype np.float32
         next_obs_batch: np.array
             Array of shape
-            (batch_size, img_h, img_w, img_c * frame_history_len)
+            (batch_size, img_c * frame_history_len, img_h, img_w)
             and dtype np.uint8
         done_mask: np.array
             Array of shape (batch_size,) and dtype np.float32
@@ -137,11 +137,11 @@ class ReplayBuffer(object):
             frames = [np.zeros_like(self.obs[0]) for _ in range(missing_context)]
             for idx in range(start_idx, end_idx):
                 frames.append(self.obs[idx % self.size])
-            return np.concatenate(frames, 2)
+            return np.concatenate(frames, 0)
         else:
             # this optimization has potential to saves about 30% compute time \o/
-            img_h, img_w = self.obs.shape[1], self.obs.shape[2]
-            return self.obs[start_idx:end_idx].transpose(1, 2, 0, 3).reshape(img_h, img_w, -1)
+            img_h, img_w = self.obs.shape[2], self.obs.shape[3]
+            return self.obs[start_idx:end_idx].reshape(-1, img_h, img_w)
 
     def store_frame(self, frame):
         """Store a single frame in the buffer at the next available index, overwriting
@@ -151,18 +151,23 @@ class ReplayBuffer(object):
         ----------
         frame: np.array
             Array of shape (img_h, img_w, img_c) and dtype np.uint8
-            the frame to be stored
-
+            and the frame will transpose to shape (img_h, img_w, img_c) to be stored
         Returns
         -------
         idx: int
             Index at which the frame is stored. To be used for `store_effect` later.
         """
+        # make sure we are not using low-dimensional observations, such as RAM
+        if len(frame.shape) > 1:
+            # transpose image frame into (img_c, img_h, img_w)
+            frame = frame.transpose(2, 0, 1)
+
         if self.obs is None:
             self.obs      = np.empty([self.size] + list(frame.shape), dtype=np.uint8)
             self.action   = np.empty([self.size],                     dtype=np.int32)
             self.reward   = np.empty([self.size],                     dtype=np.float32)
             self.done     = np.empty([self.size],                     dtype=np.bool)
+
         self.obs[self.next_idx] = frame
 
         ret = self.next_idx

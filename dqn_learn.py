@@ -160,8 +160,7 @@ def dqn_learing(
         # that you pushed into the buffer and compute the corresponding
         # input that should be given to a Q network by appending some
         # previous frames.
-        # recent_observations: shape(img_h, img_w, frame_history_len) are input to to the model
-        recent_observations = replay_buffer.encode_recent_observation().transpose(2, 0, 1)
+        recent_observations = replay_buffer.encode_recent_observation()
 
         # Choose random action if not yet start learning
         if t > learning_starts:
@@ -189,10 +188,10 @@ def dqn_learing(
             # episode, only the current state reward contributes to the target
             obs_batch, act_batch, rew_batch, next_obs_batch, done_mask = replay_buffer.sample(batch_size)
             # Convert numpy nd_array to torch variables for calculation
-            obs_batch = Variable(torch.from_numpy(obs_batch.transpose(0, 3, 1, 2)).type(dtype) / 255.0)
+            obs_batch = Variable(torch.from_numpy(obs_batch).type(dtype) / 255.0)
             act_batch = Variable(torch.from_numpy(act_batch).long())
             rew_batch = Variable(torch.from_numpy(rew_batch))
-            next_obs_batch = Variable(torch.from_numpy(next_obs_batch.transpose(0, 3, 1, 2)).type(dtype) / 255.0)
+            next_obs_batch = Variable(torch.from_numpy(next_obs_batch).type(dtype) / 255.0)
             done_mask = torch.from_numpy(done_mask)
 
             if USE_CUDA:
@@ -212,7 +211,7 @@ def dqn_learing(
             bellman_error = F.smooth_l1_loss(current_Q_values, target_Q_values)
 
             # Construct and optimizer and clear previous gradients
-            optimizer = optimizer_func(t)
+            # optimizer = optimizer_func(t)
             optimizer.zero_grad()
 
             # run backward pass and clip the gradient
