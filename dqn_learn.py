@@ -134,7 +134,7 @@ def dqn_learing(
 
     # Construct Q network optimizer function
     # optimizer_func = construct_optimizer_func(Q, optimizer_spec)
-    optimizer = torch.optim.Adam(Q.parameters())
+    optimizer = torch.optim.RMSprop(Q.parameters(), lr=2.5e-4, alpha=0.95, eps=1e-2)
 
     # Construct the replay buffer
     replay_buffer = ReplayBuffer(replay_buffer_size, frame_history_len)
@@ -216,7 +216,9 @@ def dqn_learing(
 
             # run backward pass and clip the gradient
             bellman_error.backward()
-            nn.utils.clip_grad_norm(Q.parameters(), grad_norm_clipping)
+            for param in Q.parameters():
+                param.grad.data.clamp_(-1, 1)
+            # nn.utils.clip_grad_norm(Q.parameters(), grad_norm_clipping)
 
             # Perfom the update
             optimizer.step()

@@ -37,12 +37,14 @@ def main(env, num_timesteps):
         kwargs=dict(eps=1e-4),
         lr_schedule=lr_schedule
     )
-
+    """
     exploration_schedule = PiecewiseSchedule([
         (0, 1.0),
         (1e6, 0.1),
         (num_iterations / 2, 0.01),
     ], outside_value=0.01)
+    """
+    exploration_schedule = LinearSchedule(schedule_timesteps=1000000, final_p=0.1, initial_p=1.0)
 
     dqn_learing(
         env=env,
