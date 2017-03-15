@@ -134,7 +134,7 @@ def dqn_learing(
 
     # Construct Q network optimizer function
     # optimizer_func = construct_optimizer_func(Q, optimizer_spec)
-    optimizer = torch.optim.RMSprop(Q.parameters(), lr=2.5e-4, alpha=0.95, eps=1e-2)
+    optimizer = torch.optim.Adam(Q.parameters())
 
     # Construct the replay buffer
     replay_buffer = ReplayBuffer(replay_buffer_size, frame_history_len)
