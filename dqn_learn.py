@@ -215,9 +215,9 @@ def dqn_learing(
 
             # run backward pass and clip the gradient
             bellman_error.backward()
-            for param in Q.parameters():
-                param.grad.data.clamp_(-1, 1)
-            # nn.utils.clip_grad_norm(Q.parameters(), grad_norm_clipping)
+            # for param in Q.parameters():
+                # param.grad.data.clamp_(-1, 1)
+            nn.utils.clip_grad_norm(Q.parameters(), grad_norm_clipping)
 
             # Perfom the update
             optimizer.step()
