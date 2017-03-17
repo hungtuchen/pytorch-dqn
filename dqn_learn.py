@@ -191,7 +191,7 @@ def dqn_learing(
             act_batch = Variable(torch.from_numpy(act_batch).long())
             rew_batch = Variable(torch.from_numpy(rew_batch))
             next_obs_batch = Variable(torch.from_numpy(next_obs_batch).type(dtype) / 255.0)
-            done_mask = torch.from_numpy(done_mask)
+            not_done_mask = Variable(torch.from_numpy(done_mask) == 0).type(dtype)
 
             if USE_CUDA:
                 act_batch = act_batch.cuda()
@@ -201,12 +201,11 @@ def dqn_learing(
             # Compute current Q value, q_func takes only state and output value for every state-action pair
             # We choose Q based on action taken.
             current_Q_values = Q(obs_batch).gather(1, act_batch.unsqueeze(1))
-            # Compute next Q value, based on which acion gives max Q values
-            next_max_Q_values = Variable(torch.zeros(batch_size).type(dtype))
-            # # Detach variable from the current graph since we don't want gradients to propagated
-            next_max_Q_values[done_mask == 0] = target_Q(next_obs_batch).detach().max(1)[0]
+            # Compute next Q value based on which action gives max Q values
+            next_Q_values = not_done_mask * target_Q(next_obs_batch).detach().max(1)[0]
+            # Detach variable from the current graph since we don't want gradients for next Q to propagated
             # Compute Bellman error, use huber loss to mitigate outlier impact
-            target_Q_values = rew_batch + (gamma * next_max_Q_values)
+            target_Q_values = rew_batch + (gamma * next_Q_values)
             bellman_error = F.smooth_l1_loss(current_Q_values, target_Q_values)
 
             # Construct and optimizer and clear previous gradients
