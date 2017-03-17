@@ -196,7 +196,6 @@ def dqn_learing(
             if USE_CUDA:
                 act_batch = act_batch.cuda()
                 rew_batch = rew_batch.cuda()
-                done_mask = done_mask.cuda()
 
             # Compute current Q value, q_func takes only state and output value for every state-action pair
             # We choose Q based on action taken.
