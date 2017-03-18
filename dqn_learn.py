@@ -17,8 +17,6 @@ from utils.schedule import LinearSchedule
 from utils.replay_buffer import ReplayBuffer
 from utils.gym import get_wrapper_by_name
 
-criterion = nn.MSELoss()
-
 USE_CUDA = torch.cuda.is_available()
 dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
 
@@ -124,7 +122,7 @@ def dqn_learing(
         sample = random.random()
         eps_threshold = exploration.value(t)
         if sample > eps_threshold:
-            obs = torch.from_numpy(obs).type(dtype).unsqueeze(0) / 255.0
+            obs = torch.from_numpy(obs).type(dtype).unsqueeze(0)
             # Use volatile = True if variable is only used in inference mode, i.e. don’t save the history
             return model(Variable(obs, volatile=True)).data.max(1)[1].cpu()
         else:
@@ -171,6 +169,9 @@ def dqn_learing(
             action = random.randrange(num_actions)
         # Advance one step
         obs, reward, done, _ = env.step(action)
+        # clip rewards between -1 and 1
+        reward = max(-1, min(reward, 1))
+        # Store other info in replay memory
         replay_buffer.store_effect(last_idx, action, reward, done)
         # Resets the environment when reaching an episode boundary.
         if done:
@@ -190,10 +191,10 @@ def dqn_learing(
             # episode, only the current state reward contributes to the target
             obs_batch, act_batch, rew_batch, next_obs_batch, done_mask = replay_buffer.sample(batch_size)
             # Convert numpy nd_array to torch variables for calculation
-            obs_batch = Variable(torch.from_numpy(obs_batch).type(dtype) / 255.0)
+            obs_batch = Variable(torch.from_numpy(obs_batch).type(dtype))
             act_batch = Variable(torch.from_numpy(act_batch).long())
             rew_batch = Variable(torch.from_numpy(rew_batch))
-            next_obs_batch = Variable(torch.from_numpy(next_obs_batch).type(dtype) / 255.0)
+            next_obs_batch = Variable(torch.from_numpy(next_obs_batch).type(dtype))
             not_done_mask = Variable(torch.from_numpy(1 - done_mask)).type(dtype)
 
             if USE_CUDA:
@@ -209,15 +210,16 @@ def dqn_learing(
             # Detach variable from the current graph since we don't want gradients for next Q to propagated
             # Compute Bellman error, use huber loss to mitigate outlier impact
             target_Q_values = rew_batch + (gamma * next_Q_values)
-            # bellman_error = criterion(current_Q_values, target_Q_values)
-            bellman_error = (target_Q_values - current_Q_values)
+            bellman_delta = (target_Q_values - current_Q_values)
             # clip the bellman error between [-1 , 1]
-            clipped_bellman_error = bellman_error.clamp(-1, 1)
+            clipped_bellman_delta = bellman_delta.clamp(-1, 1)
             # Construct and optimizer and clear previous gradients
             # optimizer = optimizer_func(t)
             optimizer.zero_grad()
-            # run backward pass and clip the gradient
-            current_Q_values.backward(clipped_bellman_error.data.unsqueeze(1))
+            # Note: multiply minus one will be right gradient output
+            bellman_delta = bellman_delta * -1.0
+            # run backward pass
+            current_Q_values.backward(clipped_bellman_delta.data.unsqueeze(1))
             # for param in Q.parameters():
                 # param.grad.data.clamp_(-1, 1)
             # nn.utils.clip_grad_norm(Q.parameters(), grad_norm_clipping)
