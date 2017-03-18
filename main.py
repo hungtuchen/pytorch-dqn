@@ -38,12 +38,14 @@ def main(env, num_timesteps):
         lr_schedule=lr_schedule
     )
 
+    exploration_schedule = LinearSchedule(1000000, 0.1)
+    """
     exploration_schedule = PiecewiseSchedule([
         (0, 1.0),
         (1e6, 0.1),
         (num_iterations / 2, 0.01),
     ], outside_value=0.01)
-
+    """
     dqn_learing(
         env=env,
         q_func=DQN,

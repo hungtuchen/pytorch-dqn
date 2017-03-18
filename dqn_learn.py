@@ -17,6 +17,8 @@ from utils.schedule import LinearSchedule
 from utils.replay_buffer import ReplayBuffer
 from utils.gym import get_wrapper_by_name
 
+criterion = nn.MSELoss()
+
 USE_CUDA = torch.cuda.is_available()
 dtype = torch.cuda.FloatTensor if torch.cuda.is_available() else torch.FloatTensor
 
@@ -133,7 +135,8 @@ def dqn_learing(
     target_Q = q_func(input_arg, num_actions).type(dtype)
 
     # Construct Q network optimizer function
-    optimizer_func = construct_optimizer_func(Q, optimizer_spec)
+    # optimizer_func = construct_optimizer_func(Q, optimizer_spec)
+    optimizer = torch.optim.RMSprop(Q.parameters(), lr=0.00025, alpha=0.95, eps=0.01)
 
     # Construct the replay buffer
     replay_buffer = ReplayBuffer(replay_buffer_size, frame_history_len)
@@ -201,21 +204,22 @@ def dqn_learing(
             # We choose Q based on action taken.
             current_Q_values = Q(obs_batch).gather(1, act_batch.unsqueeze(1))
             # Compute next Q value based on which action gives max Q values
+            # print(target_Q(next_obs_batch).detach().max(1))
             next_Q_values = not_done_mask * target_Q(next_obs_batch).detach().max(1)[0]
             # Detach variable from the current graph since we don't want gradients for next Q to propagated
             # Compute Bellman error, use huber loss to mitigate outlier impact
             target_Q_values = rew_batch + (gamma * next_Q_values)
-            bellman_error = F.smooth_l1_loss(current_Q_values, target_Q_values)
+            bellman_error = criterion(current_Q_values, target_Q_values)
 
             # Construct and optimizer and clear previous gradients
-            optimizer = optimizer_func(t)
+            # optimizer = optimizer_func(t)
             optimizer.zero_grad()
 
             # run backward pass and clip the gradient
             bellman_error.backward()
-            # for param in Q.parameters():
-                # param.grad.data.clamp_(-1, 1)
-            nn.utils.clip_grad_norm(Q.parameters(), grad_norm_clipping)
+            for param in Q.parameters():
+                param.grad.data.clamp_(-1, 1)
+            # nn.utils.clip_grad_norm(Q.parameters(), grad_norm_clipping)
 
             # Perfom the update
             optimizer.step()
