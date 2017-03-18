@@ -13,7 +13,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.autograd as autograd
 
-from utils.schedule import LinearSchedule
 from utils.replay_buffer import ReplayBuffer
 from utils.gym import get_wrapper_by_name
 
@@ -28,27 +27,16 @@ class Variable(autograd.Variable):
 
 """
     OptimizerSpec containing following attributes
-        constructor: The optimizer constructor ex: Adam
+        constructor: The optimizer constructor ex: RMSprop
         kwargs: {Dict} arguments for constructing optimizer
-        lr_schedule: The learning schedule using Schedule defined in utils.schedule
 """
-OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
-"""
-    Construct optimizer with adaptive learning rate
-    https://discuss.pytorch.org/t/adaptive-learning-rate/320
-    Currently in torch, we create a new optimizer every time when we want to adjust learning rate dynamically.
-    Arguments:
-        model: the model need to be updated. In this case: Q model
-        spec: {Dict} OptimizerSpec as defined above
-"""
-def construct_optimizer_func(model, spec):
-    return lambda t: spec.constructor(model.parameters(), lr=spec.lr_schedule.value(t), **spec.kwargs)
+OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs"])
 
 def dqn_learing(
     env,
     q_func,
     optimizer_spec,
-    exploration=LinearSchedule(1000000, 0.1),
+    exploration,
     stopping_criterion=None,
     replay_buffer_size=1000000,
     batch_size=32,
@@ -81,7 +69,7 @@ def dqn_learing(
         for the optimizer
     exploration: Schedule (defined in utils.schedule)
         schedule for probability of chosing random action.
-    stopping_criterion: (env, t) -> bool
+    stopping_criterion: (env) -> bool
         should return true when it's ok for the RL algorithm to stop.
         takes in env and the number of steps executed so far.
     replay_buffer_size: int
@@ -99,8 +87,6 @@ def dqn_learing(
     target_update_freq: int
         How many experience replay rounds (not steps!) to perform between
         each update to the target Q network
-    grad_norm_clipping: float or None
-        If not None gradients' norms are clipped to this value.
     """
     assert type(env.observation_space) == gym.spaces.Box
     assert type(env.action_space)      == gym.spaces.Discrete
@@ -122,7 +108,7 @@ def dqn_learing(
         sample = random.random()
         eps_threshold = exploration.value(t)
         if sample > eps_threshold:
-            obs = torch.from_numpy(obs).type(dtype).unsqueeze(0)
+            obs = torch.from_numpy(obs).type(dtype).unsqueeze(0) / 255.0
             # Use volatile = True if variable is only used in inference mode, i.e. don’t save the history
             return model(Variable(obs, volatile=True)).data.max(1)[1].cpu()
         else:
@@ -133,8 +119,7 @@ def dqn_learing(
     target_Q = q_func(input_arg, num_actions).type(dtype)
 
     # Construct Q network optimizer function
-    # optimizer_func = construct_optimizer_func(Q, optimizer_spec)
-    optimizer = torch.optim.RMSprop(Q.parameters(), lr=0.00025, alpha=0.95, eps=0.01)
+    optimizer = optimizer_spec.constructor(Q.parameters(), **optimizer_spec.kwargs)
 
     # Construct the replay buffer
     replay_buffer = ReplayBuffer(replay_buffer_size, frame_history_len)
@@ -170,7 +155,7 @@ def dqn_learing(
         # Advance one step
         obs, reward, done, _ = env.step(action)
         # clip rewards between -1 and 1
-        reward = max(-1, min(reward, 1))
+        reward = max(-1.0, min(reward, 1.0))
         # Store other info in replay memory
         replay_buffer.store_effect(last_idx, action, reward, done)
         # Resets the environment when reaching an episode boundary.
@@ -191,10 +176,10 @@ def dqn_learing(
             # episode, only the current state reward contributes to the target
             obs_batch, act_batch, rew_batch, next_obs_batch, done_mask = replay_buffer.sample(batch_size)
             # Convert numpy nd_array to torch variables for calculation
-            obs_batch = Variable(torch.from_numpy(obs_batch).type(dtype))
+            obs_batch = Variable(torch.from_numpy(obs_batch).type(dtype)) / 255.0
             act_batch = Variable(torch.from_numpy(act_batch).long())
             rew_batch = Variable(torch.from_numpy(rew_batch))
-            next_obs_batch = Variable(torch.from_numpy(next_obs_batch).type(dtype))
+            next_obs_batch = Variable(torch.from_numpy(next_obs_batch).type(dtype)) / 255.0
             not_done_mask = Variable(torch.from_numpy(1 - done_mask)).type(dtype)
 
             if USE_CUDA:
@@ -213,16 +198,12 @@ def dqn_learing(
             bellman_delta = (target_Q_values - current_Q_values)
             # clip the bellman error between [-1 , 1]
             clipped_bellman_delta = bellman_delta.clamp(-1, 1)
-            # Construct and optimizer and clear previous gradients
-            # optimizer = optimizer_func(t)
+            # Clear previous gradients before backward pass
             optimizer.zero_grad()
             # Note: multiply minus one will be right gradient output
             bellman_delta = bellman_delta * -1.0
             # run backward pass
             current_Q_values.backward(clipped_bellman_delta.data.unsqueeze(1))
-            # for param in Q.parameters():
-                # param.grad.data.clamp_(-1, 1)
-            # nn.utils.clip_grad_norm(Q.parameters(), grad_norm_clipping)
 
             # Perfom the update
             optimizer.step()
@@ -244,5 +225,4 @@ def dqn_learing(
             print("best mean reward %f" % best_mean_episode_reward)
             print("episodes %d" % len(episode_rewards))
             print("exploration %f" % exploration.value(t))
-            print("learning_rate %f" % optimizer_spec.lr_schedule.value(t))
             sys.stdout.flush()
