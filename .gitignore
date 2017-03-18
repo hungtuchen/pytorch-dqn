@@ -4,6 +4,8 @@
 # Gym monitor videos
 tmp/
 
+# pickle file
+.pkl
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

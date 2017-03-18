@@ -1,7 +1,5 @@
 # pytoch-dqn
 
-**Work in Progress**: If you are willing to help with the implementation, please check <https://discuss.pytorch.org/t/help-for-dqn-implementation-of-the-paper/1122>.
-
 This project is pytorch implementation of [Human-level control through deep reinforcement learning](http://www.nature.com/nature/journal/v518/n7540/full/nature14236.html) and I also plan to implement the following ones:
 
 - [ ] [Prioritized Experience Replay](https://arxiv.org/abs/1511.05952)
@@ -24,7 +22,7 @@ To train a model:
 ```
 $ python main.py
 
-# To train the model using ram not raw images
+# To train the model using ram not raw images, helpful for testing
 
 $ python ram.py
 ```
@@ -34,5 +32,3 @@ The model is defined in `dqn_model.py`
 The algorithm is defined in `dqn_learn.py`
 
 The running script and hyper-parameters are defined in `main.py`
-
-**Note**: Adjusting hyper-parameters using command line is coming soon in the future once I get everything working.

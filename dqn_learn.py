@@ -2,6 +2,7 @@
     This file is copied/apdated from https://github.com/berkeleydeeprlcourse/homework/tree/master/hw3
 """
 import sys
+import pickle
 import numpy as np
 from collections import namedtuple
 from itertools import count
@@ -31,6 +32,12 @@ class Variable(autograd.Variable):
         kwargs: {Dict} arguments for constructing optimizer
 """
 OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs"])
+
+Statistic = {
+    "bellman_errors": [],
+    "mean_episode_rewards": [],
+    "best_mean_episode_rewards": []
+}
 
 def dqn_learing(
     env,
@@ -108,7 +115,7 @@ def dqn_learing(
         sample = random.random()
         eps_threshold = exploration.value(t)
         if sample > eps_threshold:
-            obs = torch.from_numpy(obs).type(dtype).unsqueeze(0) / 255.0
+            obs = torch.from_numpy(obs).type(dtype).unsqueeze(0)
             # Use volatile = True if variable is only used in inference mode, i.e. don’t save the history
             return model(Variable(obs, volatile=True)).data.max(1)[1].cpu()
         else:
@@ -128,6 +135,7 @@ def dqn_learing(
     # RUN ENV     #
     ###############
     num_param_updates = 0
+    bellman_error = -float('nan')
     mean_episode_reward = -float('nan')
     best_mean_episode_reward = -float('inf')
     last_obs = env.reset()
@@ -176,10 +184,10 @@ def dqn_learing(
             # episode, only the current state reward contributes to the target
             obs_batch, act_batch, rew_batch, next_obs_batch, done_mask = replay_buffer.sample(batch_size)
             # Convert numpy nd_array to torch variables for calculation
-            obs_batch = Variable(torch.from_numpy(obs_batch).type(dtype)) / 255.0
+            obs_batch = Variable(torch.from_numpy(obs_batch).type(dtype))
             act_batch = Variable(torch.from_numpy(act_batch).long())
             rew_batch = Variable(torch.from_numpy(rew_batch))
-            next_obs_batch = Variable(torch.from_numpy(next_obs_batch).type(dtype)) / 255.0
+            next_obs_batch = Variable(torch.from_numpy(next_obs_batch).type(dtype))
             not_done_mask = Variable(torch.from_numpy(1 - done_mask)).type(dtype)
 
             if USE_CUDA:
@@ -195,15 +203,15 @@ def dqn_learing(
             # Detach variable from the current graph since we don't want gradients for next Q to propagated
             # Compute Bellman error, use huber loss to mitigate outlier impact
             target_Q_values = rew_batch + (gamma * next_Q_values)
-            bellman_delta = (target_Q_values - current_Q_values)
+            bellman_error = (target_Q_values - current_Q_values)
             # clip the bellman error between [-1 , 1]
-            clipped_bellman_delta = bellman_delta.clamp(-1, 1)
+            clipped_bellman_error = bellman_error.clamp(-1, 1)
+            # Note: clipped_bellman_delta * -1 will be right gradient
+            d_error = clipped_bellman_error * -1.0
             # Clear previous gradients before backward pass
             optimizer.zero_grad()
-            # Note: multiply minus one will be right gradient output
-            bellman_delta = bellman_delta * -1.0
             # run backward pass
-            current_Q_values.backward(clipped_bellman_delta.data.unsqueeze(1))
+            current_Q_values.backward(d_error.data.unsqueeze(1))
 
             # Perfom the update
             optimizer.step()
@@ -213,12 +221,17 @@ def dqn_learing(
             if num_param_updates % target_update_freq == 0:
                 target_Q.load_state_dict(Q.state_dict())
 
-        ### 4. Log progress
+        ### 4. Log progress and keep track of statistics
         episode_rewards = get_wrapper_by_name(env, "Monitor").get_episode_rewards()
         if len(episode_rewards) > 0:
             mean_episode_reward = np.mean(episode_rewards[-100:])
         if len(episode_rewards) > 100:
             best_mean_episode_reward = max(best_mean_episode_reward, mean_episode_reward)
+
+        Statistic["bellman_errors"].append(bellman_error)
+        Statistic["mean_episode_rewards"].append(mean_episode_reward)
+        Statistic["best_mean_episode_rewards"].append(best_mean_episode_reward)
+
         if t % LOG_EVERY_N_STEPS == 0 and t > learning_starts:
             print("Timestep %d" % (t,))
             print("mean reward (100 episodes) %f" % mean_episode_reward)
@@ -226,3 +239,8 @@ def dqn_learing(
             print("episodes %d" % len(episode_rewards))
             print("exploration %f" % exploration.value(t))
             sys.stdout.flush()
+
+            # Dump statistics to pickle
+            with open('statistics.pkl', 'wb') as f:
+                pickle.dump(Statistic, f)
+                print("Saved to %s" % 'statistics.pkl')
