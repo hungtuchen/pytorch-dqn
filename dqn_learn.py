@@ -46,6 +46,7 @@ def construct_optimizer_func(model, spec):
     return lambda t: spec.constructor(model.parameters(), lr=spec.lr_schedule.value(t), **spec.kwargs)
 
 Statistic = {
+    "losses": [],
     "mean_episode_rewards": [],
     "best_mean_episode_rewards": []
 }
@@ -150,6 +151,7 @@ def dqn_learing(
     num_param_updates = 0
     mean_episode_reward = -float('nan')
     best_mean_episode_reward = -float('inf')
+    loss = None
     last_obs = env.reset()
     LOG_EVERY_N_STEPS = 10000
 
@@ -228,6 +230,7 @@ def dqn_learing(
                 param_norm = p.grad.data.norm()
                 if param_norm > grad_norm_clipping:
                     clip_coef = grad_norm_clipping / (param_norm + 1e-6)
+                    print("clip_coef: ", clip_coef)
                     p.grad.data.mul_(clip_coef)
 
             # Perfom the update
@@ -245,6 +248,8 @@ def dqn_learing(
         if len(episode_rewards) > 100:
             best_mean_episode_reward = max(best_mean_episode_reward, mean_episode_reward)
 
+        if loss is not None:
+            Statistic["losses"].append((t, loss.data[0]))
         Statistic["mean_episode_rewards"].append(mean_episode_reward)
         Statistic["best_mean_episode_rewards"].append(best_mean_episode_reward)
 
@@ -252,6 +257,7 @@ def dqn_learing(
             print("Timestep %d" % (t,))
             print("mean reward (100 episodes) %f" % mean_episode_reward)
             print("best mean reward %f" % best_mean_episode_reward)
+            print("loss %f" % loss.data[0])
             print("episodes %d" % len(episode_rewards))
             print("exploration %f" % exploration.value(t))
             print("learning_rate %f" % optimizer_spec.lr_schedule.value(t))
