@@ -34,7 +34,6 @@ class Variable(autograd.Variable):
 OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs"])
 
 Statistic = {
-    "bellman_errors": [],
     "mean_episode_rewards": [],
     "best_mean_episode_rewards": []
 }
@@ -135,7 +134,6 @@ def dqn_learing(
     # RUN ENV     #
     ###############
     num_param_updates = 0
-    bellman_error = -float('nan')
     mean_episode_reward = -float('nan')
     best_mean_episode_reward = -float('inf')
     last_obs = env.reset()
@@ -184,10 +182,10 @@ def dqn_learing(
             # episode, only the current state reward contributes to the target
             obs_batch, act_batch, rew_batch, next_obs_batch, done_mask = replay_buffer.sample(batch_size)
             # Convert numpy nd_array to torch variables for calculation
-            obs_batch = Variable(torch.from_numpy(obs_batch).type(dtype)) / 255.0
+            obs_batch = Variable(torch.from_numpy(obs_batch).type(dtype) / 255.0)
             act_batch = Variable(torch.from_numpy(act_batch).long())
             rew_batch = Variable(torch.from_numpy(rew_batch))
-            next_obs_batch = Variable(torch.from_numpy(next_obs_batch).type(dtype)) / 255.0
+            next_obs_batch = Variable(torch.from_numpy(next_obs_batch).type(dtype) / 255.0)
             not_done_mask = Variable(torch.from_numpy(1 - done_mask)).type(dtype)
 
             if USE_CUDA:
@@ -203,7 +201,7 @@ def dqn_learing(
             # Detach variable from the current graph since we don't want gradients for next Q to propagated
             # Compute Bellman error, use huber loss to mitigate outlier impact
             target_Q_values = rew_batch + (gamma * next_Q_values)
-            bellman_error = (target_Q_values - current_Q_values)
+            bellman_error = target_Q_values - current_Q_values
             # clip the bellman error between [-1 , 1]
             clipped_bellman_error = bellman_error.clamp(-1, 1)
             # Note: clipped_bellman_delta * -1 will be right gradient
@@ -228,7 +226,6 @@ def dqn_learing(
         if len(episode_rewards) > 100:
             best_mean_episode_reward = max(best_mean_episode_reward, mean_episode_reward)
 
-        Statistic["bellman_errors"].append(bellman_error)
         Statistic["mean_episode_rewards"].append(mean_episode_reward)
         Statistic["best_mean_episode_rewards"].append(best_mean_episode_reward)
 
