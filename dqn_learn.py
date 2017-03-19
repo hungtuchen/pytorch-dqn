@@ -30,8 +30,20 @@ class Variable(autograd.Variable):
     OptimizerSpec containing following attributes
         constructor: The optimizer constructor ex: RMSprop
         kwargs: {Dict} arguments for constructing optimizer
+        lr_schedule: The learning schedule using Schedule defined in utils.schedule
 """
-OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs"])
+OptimizerSpec = namedtuple("OptimizerSpec", ["constructor", "kwargs", "lr_schedule"])
+
+"""
+    Construct optimizer with adaptive learning rate
+    https://discuss.pytorch.org/t/adaptive-learning-rate/320
+    Currently in torch, we create a new optimizer every time when we want to adjust learning rate dynamically.
+    Arguments:
+        model: the model need to be updated. In this case: Q model
+        spec: {Dict} OptimizerSpec as defined above
+"""
+def construct_optimizer_func(model, spec):
+    return lambda t: spec.constructor(model.parameters(), lr=spec.lr_schedule.value(t), **spec.kwargs)
 
 Statistic = {
     "mean_episode_rewards": [],
@@ -93,6 +105,8 @@ def dqn_learing(
     target_update_freq: int
         How many experience replay rounds (not steps!) to perform between
         each update to the target Q network
+    grad_norm_clipping: float or None
+        If not None gradients' norms are clipped to this value.
     """
     assert type(env.observation_space) == gym.spaces.Box
     assert type(env.action_space)      == gym.spaces.Discrete
@@ -125,7 +139,7 @@ def dqn_learing(
     target_Q = q_func(input_arg, num_actions).type(dtype)
 
     # Construct Q network optimizer function
-    optimizer = optimizer_spec.constructor(Q.parameters(), **optimizer_spec.kwargs)
+    optimizer_fuc = construct_optimizer_func(Q, optimizer_spec)
 
     # Construct the replay buffer
     replay_buffer = ReplayBuffer(replay_buffer_size, frame_history_len)
@@ -196,20 +210,25 @@ def dqn_learing(
             # We choose Q based on action taken.
             current_Q_values = Q(obs_batch).gather(1, act_batch.unsqueeze(1))
             # Compute next Q value based on which action gives max Q values
+            # Detach variable from the current graph since we don't want gradients for next Q to propagated
             next_max_q = target_Q(next_obs_batch).detach().max(1)[0]
             next_Q_values = not_done_mask * next_max_q
-            # Detach variable from the current graph since we don't want gradients for next Q to propagated
-            # Compute Bellman error, use huber loss to mitigate outlier impact
+
             target_Q_values = rew_batch + (gamma * next_Q_values)
-            bellman_error = target_Q_values - current_Q_values
-            # clip the bellman error between [-1 , 1]
-            clipped_bellman_error = bellman_error.clamp(-1, 1)
-            # Note: clipped_bellman_delta * -1 will be right gradient
-            d_error = clipped_bellman_error * -1.0
-            # Clear previous gradients before backward pass
+            # Use huber loss to mitigate outlier impact
+            loss = F.smooth_l1_loss(current_Q_values, target_Q_values)
+            # Construct optimizer and clear previous gradients before backward pass
+            optimizer = optimizer_fuc(t)
             optimizer.zero_grad()
             # run backward pass
-            current_Q_values.backward(d_error.data.unsqueeze(1))
+            loss.backward()
+
+            # Clip gradient norm to specified maginitude(if gradient > grad_norm_clipping)
+            for p in Q.parameters():
+                param_norm = p.grad.data.norm()
+                if param_norm > grad_norm_clipping:
+                    clip_coef = grad_norm_clipping / (param_norm + 1e-6)
+                    p.grad.data.mul_(clip_coef)
 
             # Perfom the update
             optimizer.step()
@@ -235,6 +254,7 @@ def dqn_learing(
             print("best mean reward %f" % best_mean_episode_reward)
             print("episodes %d" % len(episode_rewards))
             print("exploration %f" % exploration.value(t))
+            print("learning_rate %f" % optimizer_spec.lr_schedule.value(t))
             sys.stdout.flush()
 
             # Dump statistics to pickle
