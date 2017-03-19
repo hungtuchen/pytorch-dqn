@@ -50,8 +50,8 @@ def dqn_learing(
     learning_starts=50000,
     learning_freq=4,
     frame_history_len=4,
-    target_update_freq=10000,
-    grad_norm_clipping=10):
+    target_update_freq=10000
+    ):
 
     """Run Deep Q-learning algorithm.
 
@@ -196,11 +196,12 @@ def dqn_learing(
             # We choose Q based on action taken.
             current_Q_values = Q(obs_batch).gather(1, act_batch.unsqueeze(1))
             # Compute next Q value based on which action gives max Q values
+            # Detach variable from the current graph since we don't want gradients for next Q to propagated
             next_max_q = target_Q(next_obs_batch).detach().max(1)[0]
             next_Q_values = not_done_mask * next_max_q
-            # Detach variable from the current graph since we don't want gradients for next Q to propagated
-            # Compute Bellman error, use huber loss to mitigate outlier impact
+            # Compute the target of the current Q values
             target_Q_values = rew_batch + (gamma * next_Q_values)
+            # Compute Bellman error
             bellman_error = target_Q_values - current_Q_values
             # clip the bellman error between [-1 , 1]
             clipped_bellman_error = bellman_error.clamp(-1, 1)
