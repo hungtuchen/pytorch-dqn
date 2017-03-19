@@ -213,7 +213,7 @@ def dqn_learing(
             # Detach variable from the current graph since we don't want gradients for next Q to propagated
             next_max_q = target_Q(next_obs_batch).detach().max(1)[0]
             next_Q_values = not_done_mask * next_max_q
-
+            # Compute the target of the current Q values
             target_Q_values = rew_batch + (gamma * next_Q_values)
             # Use huber loss to mitigate outlier impact
             loss = F.smooth_l1_loss(current_Q_values, target_Q_values)
